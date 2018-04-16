@@ -51,6 +51,7 @@
 <define name="#php" de_code_autodetect="505" value="C:\Lang\PHP\5.4.0\php.exe" />
 <define name="#erlang" de_code_autodetect="506" value="C:\Lang\Erlang\erl5.10.4\bin" />
 <define name="#nodejs" de_code_autodetect="507" value="C:\Lang\nodejs\node.exe" />
+<define name="#kotlin" de_code_autodetect="508" value="/home/vagrant/.sdkman/candidates/kotlin/current/bin/kotlin" />
 
 <define name="#qbasic" de_code_autodetect="301" value="C:\Lang\QBasic\1.0\QBASIC.EXE" />
 <define name="#freeBasic" de_code_autodetect="302" value="C:\Lang\FreeBasic\0.23\fbc.exe" />
@@ -425,5 +426,14 @@
     validate='"#nodejs" %full_name "%test_input"'
     check='"#nodejs" %full_name %checker_args'
     extension='js'/>
+
+<de
+    code="508"
+    compile='"#kotlinc" -include-runtime "%full_name" -d "%name.jar"'
+    run='"#java" -jar "%name.jar"'
+    generate='"#kotlin" "%name" %args'
+    validate='"#kotlin" %full_name "%test_input"'
+    check='"#kotlin" %full_name %checker_args'
+    extension='kt'/>
 
 </judge>
