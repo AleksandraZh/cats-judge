@@ -124,7 +124,12 @@ sub get_run_params {
             $solution_opts = {
                 %limits, input_output_redir($problem->{input_file}, $problem->{output_file}) };
         }
-        my $run_cmd = $src_proc->require_property(run => $r, {
+
+        my $problem_sources = $judge->get_problem_sources($problem->{id});
+        my ($res) = grep $_->{main} eq $r->{fname}, @$problem_sources;
+        set_name_parts($res) if $res;
+
+        my $run_cmd = $src_proc->require_property(run => $res // $r, {
             %$run_cmd_opts, output_file => output_or_default($problem->{output_file}),
         }) or return;
         push @programs, CATS::Spawner::Program->new($run_cmd, [], $solution_opts);
@@ -423,10 +428,16 @@ sub prepare_modules {
         my $fname = $m->{name_parts}->{full_name};
         log_msg("module: $fname\n");
         $fu->write_to_file([ $cfg->rundir, $fname ], $m->{src}) or return;
-        my $r = $src_proc->compile($m, { section => !!$m->{main} });
-        defined $r && $r == $cats::st_testing or return $r;
+
+        if ($m->{main}) {
+            my ($src) = grep $_->{fname} eq $m->{main}, @$problem_sources;
+            $fu->write_to_file([ $cfg->rundir, $m->{main} ], $src->{src}) or return;
+        }
+
+        (grep $_->{main} eq $m->{fname}, @$problem_sources) and next;
+        ($src_proc->compile($m) // -1) == $cats::st_testing or return;
     }
-    $cats::st_testing;
+    1;
 }
 
 sub initialize_problem {
@@ -447,8 +458,7 @@ sub initialize_problem {
     for my $ps (grep $main_source_types{$_->{stype}}, @$problem_sources) {
         clear_rundir or return undef;
 
-        (prepare_modules($cats::source_modules{$ps->{stype}} || 0) // -1) == $cats::st_testing
-            or return;
+        prepare_modules($cats::source_modules{$ps->{stype}} || 0) or return;
 
         $fu->write_to_file([ $cfg->rundir, $ps->{name_parts}->{full_name} ], $ps->{src}) or return;
 
@@ -737,7 +747,7 @@ sub lint {
         my $sp_report = $sp->run_single(
             { section => $cats::log_section_lint },
             $run_cmd,
-            [ ($r->{main} // $r)->{name_parts}->{full_name} ],
+            [ $r->{main} // $r->{name_parts}->{full_name} ],
             { $src_proc->get_limits($linter, $problem) }
         ) or return;
         $sp_report->ok or return $cats::st_lint_error;
@@ -750,16 +760,20 @@ sub compile {
 
     clear_rundir or return;
 
-    my $modules_result = prepare_modules($cats::solution_module) or return;
-    $modules_result == $cats::st_testing or return $modules_result;
+    prepare_modules($cats::solution_module) or return;
 
-    $fu->write_to_file([ $cfg->rundir, $r->{name_parts}->{full_name} ], $r->{src})
-        or return;
+    my ($main) = grep $_->{main}, @$problem_sources;
+    if ($main) {
+        $fu->write_to_file([ $cfg->rundir, $r->{name_parts}->{full_name} ], $main->{src}) or return;
+        $r->{main} = $main->{main};
+    }
 
+    $fu->write_to_file([ $cfg->rundir, $r->{main} // $r->{name_parts}->{full_name} ], $r->{src}) or return;
     {
         my $lint_result = lint($r, $problem, $cats::linter_before) or return;
         $lint_result == $cats::st_testing or return $lint_result;
     }
+
     my $result = $src_proc->compile($r, { section => 1 }) or return;
     if ($result == $cats::st_compilation_error) {
         return $result;
@@ -976,34 +990,6 @@ sub test_solution {
     return ($result // '') eq 'FALL' ? $solution_status : $result;
 }
 
-sub swap_main {
-    my ($r, $problem_sources) = @_;
-
-    my $main;
-    for my $ps (@$problem_sources) {
-        if ($ps->{main}) {
-            !$main or return $log->error('Duplicate value: only one module can have main');
-            $main = $ps;
-        }
-    }
-    $main or return 1;
-
-    my $old_src = $r->{src};
-    my $old_r = $r->{de_id};
-
-    $r->{fname} = $main->{fname};
-    $r->{src} = $main->{src};
-    $r->{de_id} = $main->{de_id};
-    $r->{code} = $main->{code};
-    $r->{main} = $main;
-
-    $main->{name_parts}->{full_name} = $main->{main};
-    $main->{src} = $old_src;
-    $main->{de_id} = $old_r; #for text files
-    #$main->{code} = 1; #for text files
-    1;
-}
-
 sub prepare_problem {
     my ($r) = @_;
     $r or return $cats::st_unhandled_error;
@@ -1016,7 +1002,6 @@ sub prepare_problem {
 
     $problem_sources = $judge->get_problem_sources($r->{problem_id});
     set_name_parts($_) for @$problem_sources;
-    swap_main($r, $problem_sources) or return $cats::st_unhandled_error;
     # Ignore unsupported DEs for requests, but demand every problem to be installable on every judge.
     my %unsupported_DEs = $src_proc->unsupported_DEs($problem_sources);
     if (%unsupported_DEs) {
